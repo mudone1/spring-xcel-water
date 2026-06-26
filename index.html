@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>A-lect Water — Point Of Sale</title>
+<title>Spring Xcel Water — Point Of Sale</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.44.0/tabler-icons.min.css">
@@ -475,14 +475,14 @@ table.dt tbody tr:hover td{background:var(--surf2);}
   <div class="lw">
     <div class="ll">
       <div class="ll-brand">
-        <img class="brand-logo" src="A-lect water.png" alt="A-lect Water logo">
-        <div><div class="ll-bname">A-LECT WATER</div><div class="ll-bsub">Operations Portal</div></div>
+        <img class="brand-logo" src="spring xcel water.png" alt="Spring Xcel Water logo">
+        <div><div class="ll-bname">SPRING XCEL WATER</div><div class="ll-bsub">Operations Portal</div></div>
       </div>
       <div class="ll-hero">
-        <h1>A-lect<br>Water Portal</h1>
+        <h1>Spring Xcel<br>Water Portal</h1>
         <p>Production, sales, inventory and expenses — protected from staff view.</p>
       </div>
-      <div class="ll-foot">© 2026 A-lect Water</div>
+      <div class="ll-foot">© 2026 Spring Xcel Water</div>
     </div>
     <div class="lr">
       <h2>Sign in</h2>
@@ -502,8 +502,8 @@ table.dt tbody tr:hover td{background:var(--surf2);}
   <div class="topbar">
     <div class="tb-left">
       <button class="hamburger-btn" id="hamburger-btn" onclick="toggleSidebar()" aria-label="Toggle menu"><i class="ti ti-menu-2"></i></button>
-      <img class="brand-logo" src="A-lect water.png" alt="A-lect Water logo">
-      <span class="tb-title">A-lect water</span>
+      <img class="brand-logo" src="spring xcel water.png" alt="Spring Xcel Water logo">
+      <span class="tb-title">Spring Xcel Water</span>
     </div>
     <div class="tb-right">
       <span class="role-pill rp-staff" id="topbar-role">Staff</span>
@@ -535,7 +535,7 @@ table.dt tbody tr:hover td{background:var(--surf2);}
       <button class="nav-item admin-nav" style="display:none" onclick="goPage('reset',this)" id="nav-reset"><i class="ti ti-database-x"></i> Reset system data</button>
 
       <div class="sb-foot">
-        <div class="sb-foot-text"><strong>A-lect Water</strong><br>Data stays in browser<br><span style="font-family:'DM Mono',monospace;">v1.0 · 2026</span></div>
+        <div class="sb-foot-text"><strong>Spring Xcel Water</strong><br>Data stays in browser<br><span style="font-family:'DM Mono',monospace;">v1.0 · 2026</span></div>
       </div>
     </aside>
 
@@ -2809,7 +2809,7 @@ function printReceipt(sale){
   const dt=new Date(sale.ts||Date.now());
   const dateStr=dt.toLocaleDateString('en-GB');
   const timeStr=dt.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
-  const logoUrl=new URL('A-lect water.png',document.baseURI).href;
+  const logoUrl=new URL('spring xcel water.png',document.baseURI).href;
   const isSplit=sale.method==='SPLIT_CT'||sale.method==='SPLIT_CP';
   const hasCash=sale.method==='CASH'||isSplit;
 
@@ -2827,10 +2827,10 @@ function printReceipt(sale){
   document.getElementById('print-receipt-root').innerHTML = `
     <div class="rcpt">
       <div class="rcpt-center">
-        <img class="rcpt-logo" src="${logoUrl}" alt="A-lect Water logo">
-        <div class="rcpt-name">A-LECT WATER</div>
+        <img class="rcpt-logo" src="${logoUrl}" alt="Spring Xcel Water logo">
+        <div class="rcpt-name">SPRING XCEL WATER</div>
         <div class="rcpt-sub">Pure &amp; Sachet Water Supplies</div>
-        <div class="rcpt-addr">A-lect Water Plant<br>Mando, Kaduna, Nigeria</div>
+        <div class="rcpt-addr">Spring Xcel Water Plant<br>Mando, Kaduna, Nigeria</div>
       </div>
       <div class="rcpt-divider"></div>
       <div class="rcpt-meta">
