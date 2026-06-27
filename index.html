@@ -1795,7 +1795,7 @@ function getStoreLng(){ return GEOCFG.lng; }
 function getStoreRadius(){ return GEOCFG.radius||200; }
 
 /* =============================================
-   ATTENDANCE DATA  (stored in DB.attendance)
+   ATTENDANCE DATA  (stored in DB.attendance + Firebase 'attendance' collection)
    ============================================= */
 DB.attendance = DB.attendance || [];
 
@@ -2023,7 +2023,7 @@ async function loadFromFirebase(){
   }
   toast('Syncing data…','');
   try{
-    const cols=['sales','production','expenses','rawmats'];
+    const cols=['sales','production','expenses','rawmats','attendance'];
     for(const col of cols){
       const snap=await fsGetDocs(fsCol(col));
       snap.forEach(d=>{
@@ -2073,6 +2073,11 @@ function checkAutoSignOut(){
       r.autoSignOut = true;
       changed = true;
       if(CU && r.userId===CU.id) closedCurrentUser = true;
+      // Update Firebase record
+      if(window.fsReady && r._fbId){
+        fsUpdateDoc(fsDoc('attendance', r._fbId), {signOut: r.signOut, autoSignOut: true})
+          .catch(e=>console.warn('Auto sign-out Firebase update error:',e));
+      }
     }
   });
   if(!changed) return;
@@ -2086,8 +2091,13 @@ function checkAutoSignOut(){
     updateAttStatusBar();
   }
   if(closedCurrentUser){
-    toast("It's past 9:00 PM (store closing time) — you were automatically signed out because you didn't sign out yourself. Please remember to sign out at the end of your shift.",'e');
-    setTimeout(()=>doLogout(), 3000);
+    if(CU && CU.role !== 'staff'){
+      // Admins/managers: close the shift record but don't force logout
+      toast("Attendance record auto-closed at 9:00 PM. You remain logged in as admin.",'');
+    } else {
+      toast("It's past 9:00 PM (store closing time) — you were automatically signed out because you didn't sign out yourself. Please remember to sign out at the end of your shift.",'e');
+      setTimeout(()=>doLogout(), 3000);
+    }
   }
 }
 // Run once on load (covers the case where the page was already open before 9pm)
@@ -2102,7 +2112,7 @@ function attSignIn(user){
   // Don't double-create if somehow already open
   const existing = DB.attendance.find(r=>r.userId===user.id && r.date===todayKey && !r.signOut);
   if(!existing){
-    DB.attendance.push({
+    const rec = {
       id: DB.nid(),
       userId: user.id,
       name: user.name,
@@ -2110,7 +2120,14 @@ function attSignIn(user){
       date: todayKey,
       signIn: now.toISOString(),
       signOut: null
-    });
+    };
+    DB.attendance.push(rec);
+    // Save to Firebase
+    if(window.fsReady){
+      fsAddDoc(fsCol('attendance'), {...rec}).then(docRef=>{
+        rec._fbId = docRef.id;
+      }).catch(e=>console.warn('Attendance sign-in save error:',e));
+    }
   }
   updateAttStatusBar();
   renderAttMy();
@@ -2140,6 +2157,11 @@ function confirmSignOut(){
   const rec = DB.attendance.find(r=>r.userId===CU.id && r.date===todayKey && !r.signOut);
   if(rec){
     rec.signOut = new Date().toISOString();
+    // Update Firebase record
+    if(window.fsReady && rec._fbId){
+      fsUpdateDoc(fsDoc('attendance', rec._fbId), {signOut: rec.signOut, autoSignOut: false})
+        .catch(e=>console.warn('Attendance sign-out update error:',e));
+    }
   }
   updateAttStatusBar();
   renderAttMy();
@@ -4435,8 +4457,8 @@ async function executeReset(){
     return chk && chk.checked;
   });
 
-  // Firebase collection names (attendance is local-only, no Firebase collection)
-  const fbCollections = {sales:'sales', production:'production', rawmats:'rawmats', expenses:'expenses'};
+  // Firebase collection names
+  const fbCollections = {sales:'sales', production:'production', rawmats:'rawmats', expenses:'expenses', attendance:'attendance'};
 
   for(const key of selected){
     // Delete from Firebase
