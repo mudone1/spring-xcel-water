@@ -3,8 +3,10 @@ import { COLLECTIONS, fsCol, fsGetDocs } from "./firebase";
 
 let usersPromise: Promise<AppUser[]> | null = null;
 
-// Mirrors the original loadUsersFromFirebase(): fetches every staff account
-// so a brand-new user created on another device can sign in immediately.
+// Pulls every staff account from Firestore's `users` collection. Throws on
+// failure (bad config, network, or Firestore security rules blocking the
+// read) instead of silently returning an empty list — that way a connection
+// problem surfaces as a clear error, not a confusing "wrong password."
 export function loadUsers(): Promise<AppUser[]> {
   if (usersPromise) return usersPromise;
   usersPromise = (async () => {
@@ -15,6 +17,9 @@ export function loadUsers(): Promise<AppUser[]> {
     });
     return users;
   })();
+  usersPromise.catch(() => {
+    usersPromise = null; // don't cache a failed fetch — let the next attempt retry
+  });
   return usersPromise;
 }
 

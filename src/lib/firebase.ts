@@ -14,13 +14,14 @@ import {
 
 // Same project as the original A-lect Water app — reusing it means every
 // historical sale, production run, and staff record is already here.
+// Values come from .env.local (see .env.example).
 const firebaseConfig = {
-  apiKey: "AIzaSyCBLFD-b_4FG0JlMeIy2iIgKMLr3w7LHYY",
-  authDomain: "spring-xcel-water.firebaseapp.com",
-  projectId: "spring-xcel-water",
-  storageBucket: "spring-xcel-water.firebasestorage.app",
-  messagingSenderId: "413128829523",
-  appId: "1:413128829523:web:99443b9de7a10d424c74a6",
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
 let app: FirebaseApp;

@@ -38,9 +38,24 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   // -> after-hours bypass -> geofence overlay.
   attemptLogin: async (username, password) => {
     set({ loginError: null });
-    const users = await loadUsers();
+
+    let users;
+    try {
+      users = await loadUsers();
+    } catch (err) {
+      console.error("Failed to load users from Firestore:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      set({
+        loginError:
+          `Could not reach Firebase (${msg}). Check your .env.local Firebase values, ` +
+          `internet connection, and Firestore security rules.`,
+      });
+      return;
+    }
+
     const u = username.trim().toLowerCase();
     const user = users.find((x) => x.username === u && x.password === password && x.active);
+
     if (!user) {
       set({ loginError: "Incorrect username or PIN." });
       return;
