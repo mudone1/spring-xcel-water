@@ -4014,12 +4014,20 @@ function renderRollTracker(q){
       const s = rollStatusOf(roll);
       const pct = roll.weight>0 ? Math.min(100, Math.round(s.consumed/roll.weight*100)) : (s.status==='completed'?100:0);
       const barColor = s.status==='completed' ? 'var(--grn-m)' : (s.status==='in_machine' ? 'var(--amb-m)' : 'var(--brd2)');
-      const historyRows = s.runs.length ? s.runs.map(p=>`
+      let cumUsed = 0;
+      const historyRows = s.runs.length ? s.runs.map(p=>{
+          cumUsed += (p.matSachetQtyUsed||0);
+          const rollFinished = cumUsed >= roll.weight - 0.005;
+          const rowLabel = rollFinished ? 'Complete' : 'Leftover';
+          const rowBadge = rollFinished ? 'bg' : 'ba';
+          const bagsLabel = rollFinished ? 'bags produced' : 'bags produced so far';
+          return `
           <div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;padding:4px 0;border-bottom:1px dashed var(--brd)">
             <span style="color:var(--txt3)">${fmtDate(p.date)} · ${p.batch}</span>
             <span>${(p.matSachetQtyUsed||0).toFixed(2)} kg used</span>
-            <span style="font-weight:600">${(p.qty||0).toLocaleString()} bags · <span class="badge ${p.status==='complete'?'bg':'ba'}" style="font-size:8.5px;padding:1px 6px">${p.status==='complete'?'Complete':'In progress'}</span></span>
-          </div>`).join('') : '<div style="font-size:11px;color:var(--txt3);padding:4px 0">Not drawn into any production run yet</div>';
+            <span style="font-weight:600">${(p.qty||0).toLocaleString()} ${bagsLabel} · <span class="badge ${rowBadge}" style="font-size:8.5px;padding:1px 6px">${rowLabel}</span></span>
+          </div>`;
+        }).join('') : '<div style="font-size:11px;color:var(--txt3);padding:4px 0">Not drawn into any production run yet</div>';
       return `
       <div style="padding:.6rem .7rem;background:var(--surf2);border-radius:var(--r);margin-top:6px">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
