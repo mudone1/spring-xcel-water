@@ -893,7 +893,7 @@ table.dt tbody tr:hover td{background:var(--surf2);}
                   <div style="font-size:10px;font-weight:700;color:var(--grn);letter-spacing:.07em;text-transform:uppercase;margin-bottom:.6rem"><i class="ti ti-layers-subtract"></i> Printed Rolls material lot</div>
                   <div class="fg" style="gap:.7rem">
                     <div class="field" style="margin:0">
-                      <label>Inventory lot (ALT/…)</label>
+                      <label>Inventory lot / Shelf (ALT/…)</label>
                       <select id="p-mat-sachet" onchange="onMatLotChange('sachet')">
                         <option value="">— Select printed rolls lot —</option>
                       </select>
@@ -902,6 +902,12 @@ table.dt tbody tr:hover td{background:var(--surf2);}
                       <label>Qty utilized (KG)</label>
                       <input type="number" id="p-mat-sachet-qty" min="0" step="0.01" placeholder="e.g. 12.50" oninput="validateMatQty('sachet')">
                     </div>
+                  </div>
+                  <div class="field full" style="margin:.7rem 0 0">
+                    <label>Roll on this shelf</label>
+                    <select id="p-mat-sachet-roll" onchange="onRollSelectChange()" disabled>
+                      <option value="">— Select a shelf first —</option>
+                    </select>
                   </div>
                   <div style="font-size:11px;color:var(--grn);margin-top:6px" id="p-mat-sachet-hint">Select a printed rolls lot to see availability</div>
                 </div>
@@ -3911,6 +3917,60 @@ function rollLotStatus(lot){
   return {status,label,badgeClass,icon,original,avail,consumed,totalProduced,runs};
 }
 
+/* =============================================
+   PRINTED ROLL — INDIVIDUAL ROLL TRACKING
+   A shelf (Inventory ID, e.g. ALT0706/001) holds several physical
+   printed rolls (its rolls[] weights, e.g. 12/13/15kg). Each roll is
+   tracked on its own — remaining weight, status, and production
+   history are all derived live from production entries tagged with
+   that roll's id, exactly like shelf-level tracking above. No schema
+   change to rawmats.rolls[] (still plain KG numbers) — the roll id
+   is derived deterministically from the shelf + its position.
+   ============================================= */
+
+// Every physical roll inside a shelf, with a stable id like "ALT0706/001/R1"
+function rollsOf(shelf){
+  return (shelf.rolls||[]).map((w,i)=>({
+    shelfId: shelf.id,
+    index: i,
+    id: (shelf.altId||('RM-'+String(shelf.id).padStart(4,'0')))+'/R'+(i+1),
+    weight: (typeof w==='object'&&w!==null)?(w.weight||0):(w||0)
+  }));
+}
+function rollConsumed(rollId){
+  const rid=String(rollId);
+  return DB.production.filter(p=>String(p.matSachetRollId)===rid).reduce((a,p)=>a+(p.matSachetQtyUsed||0),0);
+}
+function rollAvailable(roll){
+  return Math.max(0, +(roll.weight - rollConsumed(roll.id)).toFixed(2));
+}
+// All production batches that have ever drawn KG from this specific roll, oldest first
+function rollRunsForRoll(rollId){
+  const rid=String(rollId);
+  return DB.production.filter(p=>String(p.matSachetRollId)===rid).slice().sort((a,b)=>(a.ts||a.id||0)-(b.ts||b.id||0));
+}
+// Lifecycle status of one roll — Available / In Machine (leftover) / Completed
+function rollStatusOf(roll){
+  const consumed=rollConsumed(roll.id);
+  const avail=rollAvailable(roll);
+  const runs=rollRunsForRoll(roll.id);
+  const totalProduced=runs.reduce((a,p)=>a+(p.qty||0),0);
+  let status,label,badgeClass,icon;
+  if(consumed<=0){
+    status='available'; label='Available'; badgeClass='bb'; icon='ti-circle-dashed';
+  } else if(avail>0.001){
+    status='in_machine'; label='In Machine — Leftover'; badgeClass='ba'; icon='ti-clock-hour-4';
+  } else {
+    status='completed'; label='Completed'; badgeClass='bg'; icon='ti-circle-check';
+  }
+  return {status,label,badgeClass,icon,weight:roll.weight,avail,consumed,totalProduced,runs};
+}
+// The roll a shelf must finish before any other roll on that shelf can be started —
+// enforces "continue the same unfinished roll until 0kg, then mark Completed"
+function activeRollForShelf(shelf){
+  return rollsOf(shelf).find(r=>rollStatusOf(r).status==='in_machine')||null;
+}
+
 // Every printed-rolls lot (regular + remainder, excluding packing bags), newest first
 function allPrintedRollLots(){
   return DB.rawmats.filter(r=>!(r.isPackingBag || String(r.category||'').startsWith('A0002'))).slice().reverse();
@@ -3922,19 +3982,22 @@ function renderRollTracker(q){
   let lots = allPrintedRollLots();
   if(query) lots = lots.filter(r => (r.altId||'').toLowerCase().includes(query) || (r.sourceAltId||'').toLowerCase().includes(query));
 
-  // "Use these first" alert — rolls that currently have leftover material sitting in the machine
+  // "Use these first" alert — individual rolls that currently have leftover material in the machine
   const alertEl = document.getElementById('roll-tracker-alert');
   const alertList = document.getElementById('roll-tracker-alert-list');
-  const leftover = lots.filter(r => rollLotStatus(r).status==='in_progress');
+  const leftoverRolls = [];
+  lots.forEach(r=>rollsOf(r).forEach(roll=>{
+    const s=rollStatusOf(roll);
+    if(s.status==='in_machine') leftoverRolls.push({shelf:r,roll,s});
+  }));
   if(alertEl && alertList){
-    if(!leftover.length){ alertEl.style.display='none'; }
+    if(!leftoverRolls.length){ alertEl.style.display='none'; }
     else {
       alertEl.style.display='block';
-      alertList.innerHTML = leftover.map(r=>{
-        const s=rollLotStatus(r);
+      alertList.innerHTML = leftoverRolls.map(({shelf,roll,s})=>{
         return `<div style="display:flex;align-items:center;gap:8px;background:rgba(255,180,40,.08);border:1px solid rgba(255,180,40,.25);border-radius:var(--r);padding:.4rem .7rem">
           <i class="ti ti-alert-triangle" style="color:var(--amb-m);font-size:13px;flex-shrink:0"></i>
-          <span><strong style="font-family:'DM Mono',monospace;color:#1a5fcb">${r.altId||'—'}</strong> — ${s.avail.toFixed(2)} kg left over in machine · ${s.totalProduced.toLocaleString()} bags produced so far — <strong style="color:var(--amb)">use this roll first</strong></span>
+          <span><strong style="font-family:'DM Mono',monospace;color:#1a5fcb">${roll.id}</strong> (shelf ${shelf.altId||'—'}) — ${s.avail.toFixed(2)} kg left over in machine · ${s.totalProduced.toLocaleString()} bags produced so far — <strong style="color:var(--amb)">use this roll first</strong></span>
         </div>`;
       }).join('');
     }
@@ -3946,36 +4009,47 @@ function renderRollTracker(q){
   }
 
   wrap.innerHTML = lots.map(r=>{
-    const s = rollLotStatus(r);
-    const pct = s.original>0 ? Math.min(100, Math.round(s.consumed/s.original*100)) : (s.status==='completed'?100:0);
-    const barColor = s.status==='completed' ? 'var(--grn-m)' : (s.status==='in_progress' ? 'var(--amb-m)' : 'var(--brd2)');
-    const historyRows = s.runs.length ? s.runs.map(p=>`
-        <div style="display:flex;justify-content:space-between;gap:8px;font-size:11.5px;padding:4px 0;border-bottom:1px dashed var(--brd)">
-          <span style="color:var(--txt3)">${fmtDate(p.date)} · ${p.batch}</span>
-          <span>${(p.matSachetQtyUsed||0).toFixed(2)} kg used</span>
-          <span style="font-weight:600">${(p.qty||0).toLocaleString()} bags · <span class="badge ${p.status==='complete'?'bg':'ba'}" style="font-size:8.5px;padding:1px 6px">${p.status==='complete'?'Complete':'In progress'}</span></span>
-        </div>`).join('') : '<div style="font-size:11.5px;color:var(--txt3);padding:4px 0">Not drawn into any production run yet</div>';
+    const rolls = rollsOf(r);
+    const rollCards = rolls.map(roll=>{
+      const s = rollStatusOf(roll);
+      const pct = roll.weight>0 ? Math.min(100, Math.round(s.consumed/roll.weight*100)) : (s.status==='completed'?100:0);
+      const barColor = s.status==='completed' ? 'var(--grn-m)' : (s.status==='in_machine' ? 'var(--amb-m)' : 'var(--brd2)');
+      const historyRows = s.runs.length ? s.runs.map(p=>`
+          <div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;padding:4px 0;border-bottom:1px dashed var(--brd)">
+            <span style="color:var(--txt3)">${fmtDate(p.date)} · ${p.batch}</span>
+            <span>${(p.matSachetQtyUsed||0).toFixed(2)} kg used</span>
+            <span style="font-weight:600">${(p.qty||0).toLocaleString()} bags · <span class="badge ${p.status==='complete'?'bg':'ba'}" style="font-size:8.5px;padding:1px 6px">${p.status==='complete'?'Complete':'In progress'}</span></span>
+          </div>`).join('') : '<div style="font-size:11px;color:var(--txt3);padding:4px 0">Not drawn into any production run yet</div>';
+      return `
+      <div style="padding:.6rem .7rem;background:var(--surf2);border-radius:var(--r);margin-top:6px">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span style="font-family:'DM Mono',monospace;font-size:11.5px;font-weight:700;color:#1a5fcb">${roll.id}</span>
+          <span class="badge ${s.badgeClass}"><i class="ti ${s.icon}" style="font-size:10px;margin-right:3px"></i> ${s.label}</span>
+          <span style="margin-left:auto;font-size:11px;color:var(--txt3)">${roll.weight.toFixed(2)} kg original</span>
+        </div>
+        <div style="display:flex;gap:12px;font-size:11.5px;flex-wrap:wrap;margin-top:4px">
+          <span style="color:${s.avail>0?'var(--grn)':'var(--txt3)'}">${s.avail.toFixed(2)} kg remaining</span>
+          <span>· <strong>${s.totalProduced.toLocaleString()}</strong> bags produced</span>
+          <span>· ${s.runs.length} run${s.runs.length!==1?'s':''}</span>
+        </div>
+        <div style="width:100%;height:4px;background:var(--brd);border-radius:3px;overflow:hidden;margin-top:5px">
+          <div style="width:${pct}%;height:100%;background:${barColor};border-radius:3px;transition:width .3s"></div>
+        </div>
+        <details style="width:100%;margin-top:4px">
+          <summary style="cursor:pointer;font-size:10.5px;color:var(--grn-m);font-weight:600;list-style:none;display:flex;align-items:center;gap:4px"><i class="ti ti-chevron-down" style="font-size:11px"></i> Roll usage history</summary>
+          <div style="margin-top:5px">${historyRows}</div>
+        </details>
+      </div>`;
+    }).join('');
     return `
     <div class="srow" style="flex-direction:column;align-items:flex-start;gap:6px;padding:.8rem 0;border-bottom:1px solid var(--brd)">
       <div style="display:flex;align-items:center;gap:8px;width:100%;flex-wrap:wrap">
         <span style="font-family:'DM Mono',monospace;font-size:12.5px;font-weight:700;color:#1a5fcb">${r.altId||'—'}</span>
         ${r.isRemainder?'<span class="badge-rlt"><i class="ti ti-refresh-dot" style="font-size:9px"></i> Remainder</span>':''}
-        <span class="badge ${s.badgeClass}"><i class="ti ${s.icon}" style="font-size:11px;margin-right:3px"></i> ${s.label}</span>
+        <span style="font-size:11px;color:var(--txt3)">${rolls.length} roll${rolls.length!==1?'s':''} on this shelf</span>
         <span style="margin-left:auto;font-size:11px;color:var(--txt3)">${fmtDate(r.date)}</span>
       </div>
-      <div style="display:flex;gap:14px;font-size:12px;flex-wrap:wrap">
-        <span>${s.original.toFixed(2)} kg original</span>
-        <span style="color:${s.avail>0?'var(--grn)':'var(--txt3)'}">· ${s.avail.toFixed(2)} kg remaining</span>
-        <span>· <strong>${s.totalProduced.toLocaleString()}</strong> bags produced total</span>
-        <span>· ${s.runs.length} production run${s.runs.length!==1?'s':''}</span>
-      </div>
-      <div style="width:100%;height:5px;background:var(--surf2);border-radius:3px;overflow:hidden">
-        <div style="width:${pct}%;height:100%;background:${barColor};border-radius:3px;transition:width .3s"></div>
-      </div>
-      <details style="width:100%">
-        <summary style="cursor:pointer;font-size:11px;color:var(--grn-m);font-weight:600;list-style:none;display:flex;align-items:center;gap:4px"><i class="ti ti-chevron-down" style="font-size:12px"></i> Full usage history</summary>
-        <div style="margin-top:6px">${historyRows}</div>
-      </details>
+      <div style="width:100%">${rollCards||'<div style="font-size:11.5px;color:var(--txt3)">No rolls recorded on this shelf</div>'}</div>
     </div>`;
   }).join('');
 }
@@ -4309,12 +4383,11 @@ function onMatLotChange(type){
     const hint=document.getElementById('p-mat-sachet-hint');
     const qtyInput=document.getElementById('p-mat-sachet-qty');
     if(!sel||!hint||!qtyInput) return;
-    if(!sel.value){ hint.textContent='Select a printed rolls lot to see availability'; qtyInput.removeAttribute('max'); return; }
+    if(!sel.value){ hint.textContent='Select a printed rolls lot to see availability'; qtyInput.removeAttribute('max'); populateRollSelect(); return; }
     const r=DB.rawmats.find(x=>String(x.id)===sel.value);
-    const avail=r?rawmatAvailable(r):0;
     const remBadge = r&&r.isRemainder ? ' <span class="badge-rlt" style="vertical-align:middle"><i class="ti ti-refresh-dot" style="font-size:9px"></i> Remainder lot</span>' : '';
-    hint.innerHTML=avail.toFixed(2)+' kg available in this lot'+remBadge;
-    qtyInput.max=avail;
+    if(remBadge) hint.innerHTML=remBadge;
+    populateRollSelect();
   } else {
     const sel=document.getElementById('p-mat-packing');
     const hint=document.getElementById('p-mat-packing-hint');
@@ -4329,18 +4402,79 @@ function onMatLotChange(type){
   updateBatchMetricsPreview();
 }
 
+// Populate the "Roll on this shelf" select once a shelf is chosen. If the shelf has a
+// roll already In Machine (leftover), lock the selection to that roll — it must be
+// finished before another roll on the same shelf can be started.
+function populateRollSelect(){
+  const rollSel=document.getElementById('p-mat-sachet-roll'); if(!rollSel) return;
+  const shelfSel=document.getElementById('p-mat-sachet');
+  const shelfId=shelfSel?shelfSel.value:'';
+  if(!shelfId){
+    rollSel.innerHTML='<option value="">— Select a shelf first —</option>';
+    rollSel.disabled=true;
+    onRollSelectChange();
+    return;
+  }
+  const shelf=DB.rawmats.find(r=>String(r.id)===shelfId);
+  if(!shelf){
+    rollSel.innerHTML='<option value="">— Select a shelf first —</option>';
+    rollSel.disabled=true;
+    onRollSelectChange();
+    return;
+  }
+  const active=activeRollForShelf(shelf);
+  if(active){
+    const s=rollStatusOf(active);
+    rollSel.innerHTML=`<option value="${active.id}">${active.id} — ${s.avail.toFixed(2)} kg left (In Machine — continue this roll)</option>`;
+    rollSel.value=active.id;
+    rollSel.disabled=true;
+  } else {
+    const available=rollsOf(shelf).filter(r=>rollStatusOf(r).status==='available');
+    if(!available.length){
+      rollSel.innerHTML='<option value="">No available rolls on this shelf</option>';
+      rollSel.disabled=true;
+    } else {
+      rollSel.innerHTML='<option value="">— Select a roll —</option>'+available.map(r=>
+        `<option value="${r.id}">${r.id} — ${r.weight.toFixed(2)} kg</option>`
+      ).join('');
+      rollSel.disabled=false;
+    }
+  }
+  onRollSelectChange();
+}
+function onRollSelectChange(){
+  const rollSel=document.getElementById('p-mat-sachet-roll');
+  const hint=document.getElementById('p-mat-sachet-hint');
+  const qtyInput=document.getElementById('p-mat-sachet-qty');
+  const shelfSel=document.getElementById('p-mat-sachet');
+  if(!rollSel||!hint||!qtyInput) return;
+  const shelf=shelfSel&&shelfSel.value?DB.rawmats.find(r=>String(r.id)===shelfSel.value):null;
+  if(!shelf||!rollSel.value){
+    hint.textContent = shelf?'Select a roll to see availability':'Select a printed rolls lot to see availability';
+    qtyInput.removeAttribute('max');
+    updateBatchMetricsPreview();
+    return;
+  }
+  const roll=rollsOf(shelf).find(r=>r.id===rollSel.value);
+  const avail=roll?rollAvailable(roll):0;
+  hint.innerHTML=avail.toFixed(2)+' kg available on roll '+rollSel.value;
+  qtyInput.max=avail;
+  updateBatchMetricsPreview();
+}
 function validateMatQty(type){
   if(type==='sachet'){
-    const sel=document.getElementById('p-mat-sachet');
+    const shelfSel=document.getElementById('p-mat-sachet');
+    const rollSel=document.getElementById('p-mat-sachet-roll');
     const qtyInput=document.getElementById('p-mat-sachet-qty');
     const hint=document.getElementById('p-mat-sachet-hint');
-    if(!sel||!sel.value) return;
-    const r=DB.rawmats.find(x=>String(x.id)===sel.value);
-    const avail=r?rawmatAvailable(r):0;
+    if(!shelfSel||!shelfSel.value||!rollSel||!rollSel.value) return;
+    const shelf=DB.rawmats.find(x=>String(x.id)===shelfSel.value);
+    const roll=shelf?rollsOf(shelf).find(r=>r.id===rollSel.value):null;
+    const avail=roll?rollAvailable(roll):0;
     const val=parseFloat(qtyInput.value)||0;
     hint.innerHTML=val>avail
-      ?'<span style="color:var(--red-m)">Only '+avail.toFixed(2)+' kg available — reduce quantity</span>'
-      :avail.toFixed(2)+' kg available in this printed rolls lot';
+      ?'<span style="color:var(--red-m)">Only '+avail.toFixed(2)+' kg available on this roll — reduce quantity</span>'
+      :avail.toFixed(2)+' kg available on roll '+(roll?roll.id:'');
   } else {
     const sel=document.getElementById('p-mat-packing');
     const qtyInput=document.getElementById('p-mat-packing-qty');
@@ -4363,18 +4497,23 @@ function submitProd(){
   const note=document.getElementById('p-note').value;
   if(!date||!batch){toast('Fill in the date','e');return;}
 
-  // Sachet Bags lot
+  // Sachet Bags lot (shelf) + the specific physical roll drawn from it
   const sachetLotRaw=document.getElementById('p-mat-sachet').value;
+  const sachetRollRaw=document.getElementById('p-mat-sachet-roll')?document.getElementById('p-mat-sachet-roll').value:'';
   const sachetQty=parseFloat(document.getElementById('p-mat-sachet-qty').value)||0;
-  let matSachetLotId=null, matSachetLabel='—', matSachetQtyUsed=0;
+  let matSachetLotId=null, matSachetRollId=null, matSachetLabel='—', matSachetQtyUsed=0;
   if(sachetLotRaw){
     const lot=DB.rawmats.find(r=>String(r.id)===sachetLotRaw);
     if(lot){
-      const avail=rawmatAvailable(lot);
+      if(!sachetRollRaw){toast('Select which roll on this shelf you are using','e');return;}
+      const roll=rollsOf(lot).find(r=>r.id===sachetRollRaw);
+      if(!roll){toast('Selected roll not found — refresh and try again','e');return;}
+      const avail=rollAvailable(roll);
       if(sachetQty<=0){toast('Enter KG utilized for the printed rolls lot','e');return;}
-      if(sachetQty>avail){toast('Only '+avail.toFixed(2)+' kg available in that printed rolls lot','e');return;}
+      if(sachetQty>avail){toast('Only '+avail.toFixed(2)+' kg available on roll '+roll.id,'e');return;}
       matSachetLotId=lot.id;
-      matSachetLabel=(lot.altId||'RM-'+String(lot.id).padStart(4,'0'))+' — '+matLabel(lot.category);
+      matSachetRollId=roll.id;
+      matSachetLabel=(lot.altId||'RM-'+String(lot.id).padStart(4,'0'))+' — '+matLabel(lot.category)+' · '+roll.id;
       matSachetQtyUsed=sachetQty;
     }
   }
@@ -4405,7 +4544,7 @@ function submitProd(){
   // Qty Produced & Machine Used are assigned later in Update Production Record —
   // the batch stays "Production In Progress" (machine unassigned/unlocked) until then.
   DB.production.push({id:DB.nid(),date,batch,
-    matSachetLotId,matSachetLabel,matSachetQtyUsed,
+    matSachetLotId,matSachetRollId,matSachetLabel,matSachetQtyUsed,
     matPackingLotId,matPackingLabel,matPackingBundles,
     matLotId,matLotLabel,matQtyUsed,
     type,qty:0,note,machine:'',status:'in_progress',staff:CU.name,staffId:CU.id});
