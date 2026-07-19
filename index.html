@@ -691,7 +691,12 @@ table.dt tbody tr:hover td{background:var(--surf2);}
                 <div id="sp-going-fields">
                   <div class="field">
                     <label>Driver name</label>
-                    <input type="text" id="sp-driver" placeholder="e.g. Musa">
+                    <div style="display:flex;gap:6px">
+                      <select id="sp-driver" style="flex:1">
+                        <option value="">— Select driver —</option>
+                      </select>
+                      <button class="btn btn-outline btn-sm admin-nav" id="add-driver-btn" style="display:none;flex-shrink:0" onclick="promptAddDriver()" title="Add a new driver"><i class="ti ti-plus"></i></button>
+                    </div>
                   </div>
                   <div class="field">
                     <label>Product</label>
@@ -900,14 +905,10 @@ table.dt tbody tr:hover td{background:var(--surf2);}
                     </div>
                     <div class="field" style="margin:0">
                       <label>Qty utilized (KG)</label>
-                      <input type="number" id="p-mat-sachet-qty" min="0" step="0.01" placeholder="e.g. 12.50" oninput="validateMatQty('sachet')">
+                      <select id="p-mat-sachet-qty" onchange="onMatQtySelectChange()" disabled>
+                        <option value="">— Select a shelf first —</option>
+                      </select>
                     </div>
-                  </div>
-                  <div class="field full" style="margin:.7rem 0 0">
-                    <label>Roll on this shelf</label>
-                    <select id="p-mat-sachet-roll" onchange="onRollSelectChange()" disabled>
-                      <option value="">— Select a shelf first —</option>
-                    </select>
                   </div>
                   <div style="font-size:11px;color:var(--grn);margin-top:6px" id="p-mat-sachet-hint">Select a printed rolls lot to see availability</div>
                 </div>
@@ -2105,6 +2106,21 @@ table.dt tbody tr:hover td{background:var(--surf2);}
   </div>
 </div>
 
+<div class="mo" id="adddriver-mo">
+  <div class="modal">
+    <div class="modal-hd"><span>Add driver</span><button class="modal-x" onclick="closeAddDriverMo()"><i class="ti ti-x"></i></button></div>
+    <div class="field full" style="margin-bottom:1.2rem">
+      <label>Driver name</label>
+      <input type="text" id="adddriver-input" placeholder="e.g. Musa" maxlength="40">
+      <div class="err" id="adddriver-err" style="display:none;margin-top:6px"><i class="ti ti-alert-circle"></i> <span id="adddriver-err-msg">Enter a driver name</span></div>
+    </div>
+    <div style="display:flex;gap:9px">
+      <button class="btn btn-primary btn-full" onclick="confirmAddDriver()"><i class="ti ti-check"></i> Add driver</button>
+      <button class="btn btn-outline btn-full" onclick="closeAddDriverMo()">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <div class="mo" id="loan-repay-mo">
   <div class="modal">
     <div class="modal-hd"><span>Log repayment</span><button class="modal-x" onclick="closeLoanRepayMo()"><i class="ti ti-x"></i></button></div>
@@ -2312,6 +2328,8 @@ const EXP_CATS_BASE = ['Operator','Fuel','Repair','Driver','Maintenance','Equipm
 let CUSTOM_EXP_CATS = (function(){ try{ const r=localStorage.getItem('xcel_exp_cats'); return r?JSON.parse(r):[]; }catch(e){ return []; } })();
 // Machines list (admin-managed, persisted in localStorage)
 let MACHINES = (function(){ try{ const r=localStorage.getItem('xcel_machines'); return r?JSON.parse(r):['Machine 1']; }catch(e){ return ['Machine 1']; } })();
+// Drivers (admin-managed list, used on the Supply/New Trip screen)
+let DRIVERS = (function(){ try{ const r=localStorage.getItem('xcel_drivers'); return r?JSON.parse(r):[]; }catch(e){ return []; } })();
 const ALL_PAGES = [
   {key:'sale',   label:'Record sale',          icon:'ti-shopping-cart'},
   {key:'prod',   label:'Log production',       icon:'ti-packages'},
@@ -2562,6 +2580,7 @@ function finaliseLogin(user){
   setDates();
   populateExpCats();
   populateUprMachineSelect();
+  populateDriverSelect();
   populateLoanStaffSelect();
   document.getElementById('p-batch').value=genBatchCode(document.getElementById('p-date').value);
   resetRollRows();
@@ -2611,6 +2630,8 @@ function applyUserPermissionsToNav(user){
   if(addCatBtn) addCatBtn.style.display = (isAdmin||canDo('add_exp_cat')) ? '' : 'none';
   const addMachineBtn = document.getElementById('add-machine-btn');
   if(addMachineBtn) addMachineBtn.style.display = isAdmin ? '' : 'none';
+  const addDriverBtn = document.getElementById('add-driver-btn');
+  if(addDriverBtn) addDriverBtn.style.display = isAdmin ? '' : 'none';
 }
 
 /* =============================================
@@ -3057,6 +3078,7 @@ function selSaleType(t, el){
   el.classList.add('sel');
   document.getElementById('walkin-fields').style.display = t==='walkin' ? 'contents' : 'none';
   document.getElementById('supply-fields').style.display = t==='supply' ? 'contents' : 'none';
+  if(t==='supply') populateDriverSelect();
   document.getElementById('leakage-fields').style.display = t==='leakage' ? '' : 'none';
   document.getElementById('r-body-walkin').style.display = t==='walkin' ? '' : 'none';
   document.getElementById('r-body-supply').style.display = t==='supply' ? '' : 'none';
@@ -4391,11 +4413,11 @@ function onMatLotChange(type){
     const hint=document.getElementById('p-mat-sachet-hint');
     const qtyInput=document.getElementById('p-mat-sachet-qty');
     if(!sel||!hint||!qtyInput) return;
-    if(!sel.value){ hint.textContent='Select a printed rolls lot to see availability'; qtyInput.removeAttribute('max'); populateRollSelect(); return; }
+    if(!sel.value){ hint.textContent='Select a printed rolls lot to see availability'; populateSachetQtySelect(); return; }
     const r=DB.rawmats.find(x=>String(x.id)===sel.value);
     const remBadge = r&&r.isRemainder ? ' <span class="badge-rlt" style="vertical-align:middle"><i class="ti ti-refresh-dot" style="font-size:9px"></i> Remainder lot</span>' : '';
     if(remBadge) hint.innerHTML=remBadge;
-    populateRollSelect();
+    populateSachetQtySelect();
   } else {
     const sel=document.getElementById('p-mat-packing');
     const hint=document.getElementById('p-mat-packing-hint');
@@ -4410,79 +4432,67 @@ function onMatLotChange(type){
   updateBatchMetricsPreview();
 }
 
-// Populate the "Roll on this shelf" select once a shelf is chosen. If the shelf has a
-// roll already In Machine (leftover), lock the selection to that roll — it must be
-// finished before another roll on the same shelf can be started.
-function populateRollSelect(){
-  const rollSel=document.getElementById('p-mat-sachet-roll'); if(!rollSel) return;
+// Populate "Qty utilized (KG)" as a dropdown of every available roll's remaining KG on the
+// selected shelf, listed in the exact order they were logged in raw material entry. If the
+// shelf has a roll already In Machine (leftover), lock the selection to that roll's KG — it
+// must be finished before another roll on the same shelf can be started.
+function populateSachetQtySelect(){
+  const qtySel=document.getElementById('p-mat-sachet-qty'); if(!qtySel) return;
   const shelfSel=document.getElementById('p-mat-sachet');
   const shelfId=shelfSel?shelfSel.value:'';
   if(!shelfId){
-    rollSel.innerHTML='<option value="">— Select a shelf first —</option>';
-    rollSel.disabled=true;
-    onRollSelectChange();
+    qtySel.innerHTML='<option value="">— Select a shelf first —</option>';
+    qtySel.disabled=true;
+    onMatQtySelectChange();
     return;
   }
   const shelf=DB.rawmats.find(r=>String(r.id)===shelfId);
   if(!shelf){
-    rollSel.innerHTML='<option value="">— Select a shelf first —</option>';
-    rollSel.disabled=true;
-    onRollSelectChange();
+    qtySel.innerHTML='<option value="">— Select a shelf first —</option>';
+    qtySel.disabled=true;
+    onMatQtySelectChange();
     return;
   }
   const active=activeRollForShelf(shelf);
   if(active){
     const s=rollStatusOf(active);
-    rollSel.innerHTML=`<option value="${active.id}">${active.id} — ${s.avail.toFixed(2)} kg left (In Machine — continue this roll)</option>`;
-    rollSel.value=active.id;
-    rollSel.disabled=true;
+    qtySel.innerHTML=`<option value="${active.id}" data-kg="${s.avail}">${s.avail.toFixed(2)} kg (${active.id} — In Machine, continue this roll)</option>`;
+    qtySel.value=active.id;
+    qtySel.disabled=true;
   } else {
     const available=rollsOf(shelf).filter(r=>rollStatusOf(r).status==='available');
     if(!available.length){
-      rollSel.innerHTML='<option value="">No available rolls on this shelf</option>';
-      rollSel.disabled=true;
+      qtySel.innerHTML='<option value="">No KG available on this shelf</option>';
+      qtySel.disabled=true;
     } else {
-      rollSel.innerHTML='<option value="">— Select a roll —</option>'+available.map(r=>
-        `<option value="${r.id}">${r.id} — ${r.weight.toFixed(2)} kg</option>`
+      qtySel.innerHTML='<option value="">— Select KG —</option>'+available.map(r=>
+        `<option value="${r.id}" data-kg="${r.weight}">${r.weight.toFixed(2)} kg (${r.id})</option>`
       ).join('');
-      rollSel.disabled=false;
+      qtySel.disabled=false;
     }
   }
-  onRollSelectChange();
+  onMatQtySelectChange();
 }
-function onRollSelectChange(){
-  const rollSel=document.getElementById('p-mat-sachet-roll');
+function onMatQtySelectChange(){
+  const qtySel=document.getElementById('p-mat-sachet-qty');
   const hint=document.getElementById('p-mat-sachet-hint');
-  const qtyInput=document.getElementById('p-mat-sachet-qty');
   const shelfSel=document.getElementById('p-mat-sachet');
-  if(!rollSel||!hint||!qtyInput) return;
+  if(!qtySel||!hint) return;
   const shelf=shelfSel&&shelfSel.value?DB.rawmats.find(r=>String(r.id)===shelfSel.value):null;
-  if(!shelf||!rollSel.value){
-    hint.textContent = shelf?'Select a roll to see availability':'Select a printed rolls lot to see availability';
-    qtyInput.removeAttribute('max');
+  if(!shelf||!qtySel.value){
+    hint.textContent = shelf?'Select the KG to use from this shelf':'Select a printed rolls lot to see availability';
     updateBatchMetricsPreview();
     return;
   }
-  const roll=rollsOf(shelf).find(r=>r.id===rollSel.value);
-  const avail=roll?rollAvailable(roll):0;
-  hint.innerHTML=avail.toFixed(2)+' kg available on roll '+rollSel.value;
-  qtyInput.max=avail;
+  const opt=qtySel.options[qtySel.selectedIndex];
+  const kg=opt?parseFloat(opt.dataset.kg)||0:0;
+  hint.innerHTML=kg.toFixed(2)+' kg selected from roll '+qtySel.value;
   updateBatchMetricsPreview();
 }
 function validateMatQty(type){
   if(type==='sachet'){
-    const shelfSel=document.getElementById('p-mat-sachet');
-    const rollSel=document.getElementById('p-mat-sachet-roll');
-    const qtyInput=document.getElementById('p-mat-sachet-qty');
-    const hint=document.getElementById('p-mat-sachet-hint');
-    if(!shelfSel||!shelfSel.value||!rollSel||!rollSel.value) return;
-    const shelf=DB.rawmats.find(x=>String(x.id)===shelfSel.value);
-    const roll=shelf?rollsOf(shelf).find(r=>r.id===rollSel.value):null;
-    const avail=roll?rollAvailable(roll):0;
-    const val=parseFloat(qtyInput.value)||0;
-    hint.innerHTML=val>avail
-      ?'<span style="color:var(--red-m)">Only '+avail.toFixed(2)+' kg available on this roll — reduce quantity</span>'
-      :avail.toFixed(2)+' kg available on roll '+(roll?roll.id:'');
+    // Handled live by onMatQtySelectChange() — selection is a fixed roll KG, nothing to validate.
+    return;
   } else {
     const sel=document.getElementById('p-mat-packing');
     const qtyInput=document.getElementById('p-mat-packing-qty');
@@ -4505,20 +4515,22 @@ function submitProd(){
   const note=document.getElementById('p-note').value;
   if(!date||!batch){toast('Fill in the date','e');return;}
 
-  // Sachet Bags lot (shelf) + the specific physical roll drawn from it
+  // Sachet Bags lot (shelf) + the specific physical roll drawn from it — one merged
+  // dropdown: selecting a KG amount IS selecting the roll it belongs to
   const sachetLotRaw=document.getElementById('p-mat-sachet').value;
-  const sachetRollRaw=document.getElementById('p-mat-sachet-roll')?document.getElementById('p-mat-sachet-roll').value:'';
-  const sachetQty=parseFloat(document.getElementById('p-mat-sachet-qty').value)||0;
+  const sachetQtySel=document.getElementById('p-mat-sachet-qty');
+  const sachetRollRaw=sachetQtySel?sachetQtySel.value:'';
+  const sachetOpt=sachetQtySel?sachetQtySel.options[sachetQtySel.selectedIndex]:null;
+  const sachetQty=sachetOpt?parseFloat(sachetOpt.dataset.kg)||0:0;
   let matSachetLotId=null, matSachetRollId=null, matSachetLabel='—', matSachetQtyUsed=0;
   if(sachetLotRaw){
     const lot=DB.rawmats.find(r=>String(r.id)===sachetLotRaw);
     if(lot){
-      if(!sachetRollRaw){toast('Select which roll on this shelf you are using','e');return;}
+      if(!sachetRollRaw){toast('Select the KG to use from this shelf','e');return;}
       const roll=rollsOf(lot).find(r=>r.id===sachetRollRaw);
       if(!roll){toast('Selected roll not found — refresh and try again','e');return;}
       const avail=rollAvailable(roll);
-      if(sachetQty<=0){toast('Enter KG utilized for the printed rolls lot','e');return;}
-      if(sachetQty>avail){toast('Only '+avail.toFixed(2)+' kg available on roll '+roll.id,'e');return;}
+      if(sachetQty<=0||sachetQty>avail+0.005){toast('Only '+avail.toFixed(2)+' kg available on roll '+roll.id,'e');return;}
       matSachetLotId=lot.id;
       matSachetRollId=roll.id;
       matSachetLabel=(lot.altId||'RM-'+String(lot.id).padStart(4,'0'))+' — '+matLabel(lot.category)+' · '+roll.id;
@@ -4609,7 +4621,9 @@ function updateBatchMetricsPreview(){
 
   // Sachet lot cost
   const sachetLotId=document.getElementById('p-mat-sachet')?.value;
-  const sachetQty=parseFloat(document.getElementById('p-mat-sachet-qty')?.value)||0;
+  const sachetQtySelEl=document.getElementById('p-mat-sachet-qty');
+  const sachetOptEl=sachetQtySelEl?sachetQtySelEl.options[sachetQtySelEl.selectedIndex]:null;
+  const sachetQty=sachetOptEl?parseFloat(sachetOptEl.dataset.kg)||0:0;
   const sachetLot=sachetLotId?DB.rawmats.find(r=>String(r.id)===sachetLotId):null;
   const sachetCost=sachetLot&&sachetQty>0?sachetQty*sachetLot.unitCost:0;
 
@@ -4910,6 +4924,37 @@ function confirmAddCat(){
 function saveMachines(arr){
   try{ localStorage.setItem('xcel_machines', JSON.stringify(arr)); }catch(e){}
 }
+/* ── Drivers (admin-managed list, used on Supply/New Trip) ── */
+function saveDrivers(arr){
+  try{ localStorage.setItem('xcel_drivers', JSON.stringify(arr)); }catch(e){}
+}
+function populateDriverSelect(selectVal){
+  const sel=document.getElementById('sp-driver'); if(!sel) return;
+  sel.innerHTML='<option value="">— Select driver —</option>'+DRIVERS.map(d=>`<option value="${d}">${d}</option>`).join('');
+  if(selectVal && DRIVERS.includes(selectVal)) sel.value=selectVal;
+}
+function promptAddDriver(){
+  document.getElementById('adddriver-input').value='';
+  document.getElementById('adddriver-err').style.display='none';
+  document.getElementById('adddriver-mo').classList.add('open');
+  setTimeout(()=>document.getElementById('adddriver-input').focus(),50);
+}
+function closeAddDriverMo(){ document.getElementById('adddriver-mo').classList.remove('open'); }
+function confirmAddDriver(){
+  const input = document.getElementById('adddriver-input');
+  const name = input.value.trim();
+  const errEl = document.getElementById('adddriver-err');
+  const errMsg = document.getElementById('adddriver-err-msg');
+  if(!name){ errMsg.textContent='Enter a driver name'; errEl.style.display='flex'; return; }
+  if(DRIVERS.some(d=>d.toLowerCase()===name.toLowerCase())){
+    errMsg.textContent='That driver already exists'; errEl.style.display='flex'; return;
+  }
+  DRIVERS.push(name);
+  saveDrivers(DRIVERS);
+  populateDriverSelect(name);
+  closeAddDriverMo();
+  toast('Driver "'+name+'" added','s');
+}
 
 /* =============================================
    UPDATE PRODUCTION RECORD — machine locking + batch completion
@@ -4954,11 +4999,18 @@ function onUprBatchChange(){
   const qtyInput=document.getElementById('upr-qty');
   const sofarRow=document.getElementById('upr-sofar-row');
   const sofarVal=document.getElementById('upr-sofar-val');
+  const machineSel=document.getElementById('upr-machine');
+  const machineHint=document.getElementById('upr-machine-hint');
   if(!p){
     if(lotPrev) lotPrev.value='';
     if(hint) hint.textContent='';
     populateUprMachineSelect();
-    if(statusSel) statusSel.value='';
+    if(machineSel) machineSel.disabled=false;
+    if(machineHint) machineHint.textContent='';
+    if(statusSel){
+      statusSel.innerHTML='<option value="">— Select status —</option><option value="complete">Production Complete</option><option value="in_progress">Leftovers in Machine</option>';
+      statusSel.value='';
+    }
     if(qtyRow) qtyRow.style.display='none';
     if(qtyInput) qtyInput.value='';
     if(sofarRow) sofarRow.style.display='none';
@@ -4970,7 +5022,24 @@ function onUprBatchChange(){
   if(lotPrev) lotPrev.value=lotLabel;
   if(hint) hint.textContent='Logged '+fmtDate(p.date)+' · '+p.type+(p.qty?' · '+p.qty+' bags so far':'');
   populateUprMachineSelect(p.id, p.machine||'');
-  if(statusSel) statusSel.value='';
+  // Once a batch has already been assigned a machine, lock it — resuming/continuing
+  // production must stay on the same machine, not switch to a different one
+  if(p.machine){
+    if(machineSel){ machineSel.value=p.machine; machineSel.disabled=true; }
+    if(machineHint) machineHint.innerHTML='<i class="ti ti-lock" style="color:var(--amb)"></i> Locked to <strong>'+p.machine+'</strong> — this batch already started on this machine';
+  } else {
+    if(machineSel) machineSel.disabled=false;
+    if(machineHint) machineHint.textContent='';
+  }
+  // A batch that already has a machine assigned has already been through one
+  // "Leftovers in Machine" cycle — it can't be marked leftover a second time on
+  // the same machine, so only Production Complete is offered from here on
+  if(statusSel){
+    statusSel.innerHTML = p.machine
+      ? '<option value="">— Select status —</option><option value="complete">Production Complete</option>'
+      : '<option value="">— Select status —</option><option value="complete">Production Complete</option><option value="in_progress">Leftovers in Machine</option>';
+    statusSel.value='';
+  }
   if(qtyRow) qtyRow.style.display='none';
   if(qtyInput) qtyInput.value='';
   // Keep the cumulative quantity produced so far visible when reopening a leftover record
