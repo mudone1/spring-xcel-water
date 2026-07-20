@@ -3959,25 +3959,31 @@ function rollsOf(shelf){
     weight: (typeof w==='object'&&w!==null)?(w.weight||0):(w||0)
   }));
 }
-function rollConsumed(rollId){
-  const rid=String(rollId);
-  return DB.production.filter(p=>String(p.matSachetRollId)===rid).reduce((a,p)=>a+(p.matSachetQtyUsed||0),0);
+// Every production doc that ever drew from this roll. Also picks up older entries
+// logged before per-roll tracking existed — those only recorded the shelf
+// (matSachetLotId, no matSachetRollId) — and attributes them to the shelf's first
+// roll (index 0) only, so historical production isn't lost and nothing is double-counted.
+function rollDocsForRoll(roll){
+  const rid=String(roll.id);
+  return DB.production.filter(p=>{
+    if(String(p.matSachetRollId)===rid) return true;
+    if(!p.matSachetRollId && p.matSachetLotId!=null && String(p.matSachetLotId)===String(roll.shelfId) && roll.index===0) return true;
+    return false;
+  });
+}
+function rollConsumed(roll){
+  return rollDocsForRoll(roll).reduce((a,p)=>a+(p.matSachetQtyUsed||0),0);
 }
 function rollAvailable(roll){
-  return Math.max(0, +(roll.weight - rollConsumed(roll.id)).toFixed(2));
-}
-// Every production doc that ever drew from this roll
-function rollDocsForRoll(rollId){
-  const rid=String(rollId);
-  return DB.production.filter(p=>String(p.matSachetRollId)===rid);
+  return Math.max(0, +(roll.weight - rollConsumed(roll)).toFixed(2));
 }
 // The full sequence of Update Production Record stages for this roll, oldest first —
 // e.g. "Leftover — 200 bags so far" then later "Complete — 350 bags total" as two
 // separate entries, instead of collapsing them into one summed row. Falls back to a
 // single synthesized entry for older records logged before per-stage history existed.
-function rollHistoryEntries(rollId){
+function rollHistoryEntries(roll){
   const entries=[];
-  rollDocsForRoll(rollId).forEach(p=>{
+  rollDocsForRoll(roll).forEach(p=>{
     if(p.updateLog && p.updateLog.length){
       p.updateLog.forEach(log=>entries.push({
         ts: log.ts||0, date: log.date||p.date, batch: p.batch,
@@ -3999,10 +4005,10 @@ function rollHistoryEntries(rollId){
 // "In Machine" for as long as its most recent production update says Leftover,
 // and only flips to Completed once a batch on it is actually marked Complete.
 function rollStatusOf(roll){
-  const docs=rollDocsForRoll(roll.id);
-  const consumed=rollConsumed(roll.id);
+  const docs=rollDocsForRoll(roll);
+  const consumed=rollConsumed(roll);
   const avail=rollAvailable(roll);
-  const runs=rollHistoryEntries(roll.id);
+  const runs=rollHistoryEntries(roll);
   const totalProduced=docs.reduce((a,p)=>a+(p.qty||0),0);
   let status,label,badgeClass,icon;
   if(!docs.length){
