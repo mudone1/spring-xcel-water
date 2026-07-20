@@ -3966,24 +3966,54 @@ function rollConsumed(rollId){
 function rollAvailable(roll){
   return Math.max(0, +(roll.weight - rollConsumed(roll.id)).toFixed(2));
 }
-// All production batches that have ever drawn KG from this specific roll, oldest first
-function rollRunsForRoll(rollId){
+// Every production doc that ever drew from this roll
+function rollDocsForRoll(rollId){
   const rid=String(rollId);
-  return DB.production.filter(p=>String(p.matSachetRollId)===rid).slice().sort((a,b)=>(a.ts||a.id||0)-(b.ts||b.id||0));
+  return DB.production.filter(p=>String(p.matSachetRollId)===rid);
 }
-// Lifecycle status of one roll — Available / In Machine (leftover) / Completed
+// The full sequence of Update Production Record stages for this roll, oldest first —
+// e.g. "Leftover — 200 bags so far" then later "Complete — 350 bags total" as two
+// separate entries, instead of collapsing them into one summed row. Falls back to a
+// single synthesized entry for older records logged before per-stage history existed.
+function rollHistoryEntries(rollId){
+  const entries=[];
+  rollDocsForRoll(rollId).forEach(p=>{
+    if(p.updateLog && p.updateLog.length){
+      p.updateLog.forEach(log=>entries.push({
+        ts: log.ts||0, date: log.date||p.date, batch: p.batch,
+        addedQty: log.addedQty||0, cumQty: log.cumQty||0, status: log.status,
+        matSachetQtyUsed: p.matSachetQtyUsed||0
+      }));
+    } else if(p.qty>0 || p.status){
+      entries.push({
+        ts: p.ts||p.id||0, date: p.date, batch: p.batch,
+        addedQty: p.qty||0, cumQty: p.qty||0, status: p.status,
+        matSachetQtyUsed: p.matSachetQtyUsed||0
+      });
+    }
+  });
+  return entries.sort((a,b)=>(a.ts||0)-(b.ts||0));
+}
+// Lifecycle status of one roll — Available / In Machine (leftover) / Completed.
+// Based on the batch's own recorded status (not raw weight math) — a roll stays
+// "In Machine" for as long as its most recent production update says Leftover,
+// and only flips to Completed once a batch on it is actually marked Complete.
 function rollStatusOf(roll){
+  const docs=rollDocsForRoll(roll.id);
   const consumed=rollConsumed(roll.id);
   const avail=rollAvailable(roll);
-  const runs=rollRunsForRoll(roll.id);
-  const totalProduced=runs.reduce((a,p)=>a+(p.qty||0),0);
+  const runs=rollHistoryEntries(roll.id);
+  const totalProduced=docs.reduce((a,p)=>a+(p.qty||0),0);
   let status,label,badgeClass,icon;
-  if(consumed<=0){
+  if(!docs.length){
     status='available'; label='Available'; badgeClass='bb'; icon='ti-circle-dashed';
-  } else if(avail>0.001){
-    status='in_machine'; label='In Machine — Leftover'; badgeClass='ba'; icon='ti-clock-hour-4';
   } else {
-    status='completed'; label='Completed'; badgeClass='bg'; icon='ti-circle-check';
+    const mostRecent=docs.slice().sort((a,b)=>(b.ts||b.id||0)-(a.ts||a.id||0))[0];
+    if(mostRecent.status==='complete'){
+      status='completed'; label='Completed'; badgeClass='bg'; icon='ti-circle-check';
+    } else {
+      status='in_machine'; label='In Machine — Leftover'; badgeClass='ba'; icon='ti-clock-hour-4';
+    }
   }
   return {status,label,badgeClass,icon,weight:roll.weight,avail,consumed,totalProduced,runs};
 }
@@ -4031,25 +4061,30 @@ function renderRollTracker(q){
   }
 
   wrap.innerHTML = lots.map(r=>{
-    const rolls = rollsOf(r);
-    const rollCards = rolls.map(roll=>{
+    // History = rolls actually used in production. Untouched/Available rolls with
+    // zero production runs are inventory, not history — leave them off this view.
+    const usedRolls = rollsOf(r).filter(roll => rollStatusOf(roll).runs.length > 0);
+    if(!usedRolls.length) return '';
+    const rollCards = usedRolls.map(roll=>{
       const s = rollStatusOf(roll);
       const pct = roll.weight>0 ? Math.min(100, Math.round(s.consumed/roll.weight*100)) : (s.status==='completed'?100:0);
       const barColor = s.status==='completed' ? 'var(--grn-m)' : (s.status==='in_machine' ? 'var(--amb-m)' : 'var(--brd2)');
-      let cumUsed = 0;
-      const historyRows = s.runs.length ? s.runs.map(p=>{
-          cumUsed += (p.matSachetQtyUsed||0);
-          const rollFinished = cumUsed >= roll.weight - 0.005;
-          const rowLabel = rollFinished ? 'Complete' : 'Leftover';
-          const rowBadge = rollFinished ? 'bg' : 'ba';
-          const bagsLabel = rollFinished ? 'bags produced' : 'bags produced so far';
+      // One row per recorded stage — a batch that went Leftover then later Complete
+      // shows both stages here in sequence, not summed into a single final row
+      const historyRows = s.runs.map(entry=>{
+          const isComplete = entry.status==='complete';
+          const rowLabel = isComplete ? 'Complete' : 'Leftover';
+          const rowBadge = isComplete ? 'bg' : 'ba';
+          const bagsText = isComplete
+            ? entry.cumQty.toLocaleString()+' bags total produced'
+            : entry.addedQty.toLocaleString()+' bags produced so far';
           return `
           <div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;padding:4px 0;border-bottom:1px dashed var(--brd)">
-            <span style="color:var(--txt3)">${fmtDate(p.date)} · ${p.batch}</span>
-            <span>${(p.matSachetQtyUsed||0).toFixed(2)} kg used</span>
-            <span style="font-weight:600">${(p.qty||0).toLocaleString()} ${bagsLabel} · <span class="badge ${rowBadge}" style="font-size:8.5px;padding:1px 6px">${rowLabel}</span></span>
+            <span style="color:var(--txt3)">${fmtDate(entry.date)} · ${entry.batch}</span>
+            <span>${entry.matSachetQtyUsed.toFixed(2)} kg used</span>
+            <span style="font-weight:600">${bagsText} · <span class="badge ${rowBadge}" style="font-size:8.5px;padding:1px 6px">${rowLabel}</span></span>
           </div>`;
-        }).join('') : '<div style="font-size:11px;color:var(--txt3);padding:4px 0">Not drawn into any production run yet</div>';
+        }).join('');
       return `
       <div style="padding:.6rem .7rem;background:var(--surf2);border-radius:var(--r);margin-top:6px">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -4060,7 +4095,7 @@ function renderRollTracker(q){
         <div style="display:flex;gap:12px;font-size:11.5px;flex-wrap:wrap;margin-top:4px">
           <span style="color:${s.avail>0?'var(--grn)':'var(--txt3)'}">${s.avail.toFixed(2)} kg remaining</span>
           <span>· <strong>${s.totalProduced.toLocaleString()}</strong> bags produced</span>
-          <span>· ${s.runs.length} run${s.runs.length!==1?'s':''}</span>
+          <span>· ${s.runs.length} stage${s.runs.length!==1?'s':''}</span>
         </div>
         <div style="width:100%;height:4px;background:var(--brd);border-radius:3px;overflow:hidden;margin-top:5px">
           <div style="width:${pct}%;height:100%;background:${barColor};border-radius:3px;transition:width .3s"></div>
@@ -4076,12 +4111,16 @@ function renderRollTracker(q){
       <div style="display:flex;align-items:center;gap:8px;width:100%;flex-wrap:wrap">
         <span style="font-family:'DM Mono',monospace;font-size:12.5px;font-weight:700;color:#1a5fcb">${r.altId||'—'}</span>
         ${r.isRemainder?'<span class="badge-rlt"><i class="ti ti-refresh-dot" style="font-size:9px"></i> Remainder</span>':''}
-        <span style="font-size:11px;color:var(--txt3)">${rolls.length} roll${rolls.length!==1?'s':''} on this shelf</span>
+        <span style="font-size:11px;color:var(--txt3)">${usedRolls.length} roll${usedRolls.length!==1?'s':''} used on this shelf</span>
         <span style="margin-left:auto;font-size:11px;color:var(--txt3)">${fmtDate(r.date)}</span>
       </div>
-      <div style="width:100%">${rollCards||'<div style="font-size:11.5px;color:var(--txt3)">No rolls recorded on this shelf</div>'}</div>
+      <div style="width:100%">${rollCards}</div>
     </div>`;
   }).join('');
+
+  if(!wrap.innerHTML.trim()){
+    wrap.innerHTML='<div class="empty" style="padding:1.5rem 0"><i class="ti ti-layers-subtract"></i><p>No printed rolls used in production yet</p></div>';
+  }
 }
 
 /* =============================================
@@ -5102,8 +5141,13 @@ function submitProdUpdate(){
   p.status=status;
   if(note) p.note = p.note ? p.note+' — '+note : note;
 
+  // Keep a per-stage log so a batch that goes Leftover then later Complete shows both
+  // stages in roll history, instead of only the final state
+  p.updateLog = p.updateLog || [];
+  p.updateLog.push({ ts: Date.now(), date: TODAY, status, addedQty, cumQty: p.qty });
+
   if(window.fsReady && p._fbId){
-    fsUpdateDoc(fsDoc('production', p._fbId), {machine:p.machine, qty:p.qty, status:p.status, note:p.note}).catch(e=>console.warn('FS prod update:',e));
+    fsUpdateDoc(fsDoc('production', p._fbId), {machine:p.machine, qty:p.qty, status:p.status, note:p.note, updateLog:p.updateLog}).catch(e=>console.warn('FS prod update:',e));
   }
 
   showOk('upr-ok');
