@@ -4082,7 +4082,7 @@ function renderRollTracker(q){
           const rowLabel = isComplete ? 'Complete' : 'Leftover';
           const rowBadge = isComplete ? 'bg' : 'ba';
           const bagsText = isComplete
-            ? entry.cumQty.toLocaleString()+' bags total produced'
+            ? entry.addedQty.toLocaleString()+' bags produced'
             : entry.addedQty.toLocaleString()+' bags produced so far';
           return `
           <div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;padding:4px 0;border-bottom:1px dashed var(--brd)">
