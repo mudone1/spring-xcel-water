@@ -1776,11 +1776,83 @@ table.dt tbody tr:hover td{background:var(--surf2);}
       </div>
 
       <!-- RESET SYSTEM DATA (ADMIN ONLY) -->
+      <!-- RECYCLE BIN PAGE -->
+      <div class="page" id="page-trash">
+        <div class="ph">
+          <div>
+            <div class="ph-title">Recycle Bin <span class="atag"><i class="ti ti-lock" style="font-size:8px"></i> Admin</span></div>
+            <div class="ph-sub">Recover deleted records with one click</div>
+          </div>
+        </div>
+        <div class="card" style="overflow:auto">
+          <div id="trash-btn-group" style="display:none;margin-bottom:1.2rem">
+            <button class="btn btn-primary btn-sm" onclick="createAutoBackup()"><i class="ti ti-backup"></i> Backup Now</button>
+            <button class="btn btn-danger btn-sm" onclick="emptyTrash()" style="margin-left:8px"><i class="ti ti-trash-x"></i> Empty Trash</button>
+          </div>
+          <table class="dt" style="width:100%">
+            <thead><tr><th>Date</th><th>Type</th><th>Details</th><th>Deleted</th><th>Action</th></tr></thead>
+            <tbody id="trash-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- DATA BACKUPS PAGE -->
+      <div class="page" id="page-backups">
+        <div class="ph">
+          <div>
+            <div class="ph-title">Data Backups <span class="atag"><i class="ti ti-lock" style="font-size:8px"></i> Admin</span></div>
+            <div class="ph-sub">Restore all data from a previous date</div>
+          </div>
+        </div>
+        <div class="card" style="overflow:auto;margin-bottom:1.5rem">
+          <div style="background:#f5f5f5;border:1px solid #ddd;border-radius:var(--r-lg);padding:1rem;margin-bottom:1.2rem">
+            <div style="font-size:12px;color:#666;line-height:1.6">
+              <strong>How backups work:</strong> Automatic backups are created every time you open the app and every 6 hours during use. You can also create manual backups anytime. Select any backup to restore all data from that date — this overwrites everything.
+            </div>
+          </div>
+          <div id="backups-btn-group" style="display:none;margin-bottom:1.2rem">
+            <button class="btn btn-primary btn-sm" onclick="createAutoBackup()"><i class="ti ti-backup"></i> Create Manual Backup</button>
+          </div>
+          <table class="dt" style="width:100%">
+            <thead><tr><th>Backup</th><th>Created</th><th>Contains</th><th>Action</th></tr></thead>
+            <tbody id="backups-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
       <div class="page" id="page-reset">
         <div class="ph">
           <div>
             <div class="ph-title">Reset system data <span class="atag"><i class="ti ti-lock" style="font-size:8px"></i> Admin</span></div>
             <div class="ph-sub">Permanently wipe test data before going live — this cannot be undone</div>
+          </div>
+        </div>
+
+        <!-- Restore Point Section -->
+        <div class="card" style="max-width:720px;margin-bottom:1.5rem;border-color:var(--grn);background:#0a1f0a">
+          <div style="display:flex;gap:12px;align-items:center;margin-bottom:1rem">
+            <i class="ti ti-cloud-download" style="font-size:20px;color:var(--grn)"></i>
+            <div>
+              <div style="font-weight:600;color:var(--grn);font-size:14px">Restore from Backup</div>
+              <div style="font-size:12px;color:var(--txt3)">Restore all data from a previous point in time</div>
+            </div>
+          </div>
+
+          <div style="margin-bottom:1rem">
+            <div style="font-size:12px;font-weight:600;color:var(--txt2);margin-bottom:0.6rem"><i class="ti ti-history"></i> Top 5 Recent Backups</div>
+            <div id="reset-top-backups" style="display:flex;flex-direction:column;gap:6px">
+              <div style="color:var(--txt3);font-size:12px">No backups available yet</div>
+            </div>
+          </div>
+
+          <div style="border-top:1px solid rgba(255,255,255,0.1);padding-top:1rem">
+            <div style="font-size:12px;font-weight:600;color:var(--txt2);margin-bottom:0.6rem"><i class="ti ti-calendar"></i> Or select any backup date</div>
+            <div style="display:flex;gap:8px">
+              <select id="reset-backup-select" style="flex:1;padding:8px;border:1px solid var(--txt3);border-radius:var(--r-sm);background:#111;color:#fff;font-size:13px">
+                <option value="">— All backups —</option>
+              </select>
+              <button class="btn btn-success btn-sm" onclick="restoreBackupFromReset()" style="flex-shrink:0"><i class="ti ti-restore"></i> Restore</button>
+            </div>
           </div>
         </div>
 
@@ -2330,6 +2402,89 @@ let CUSTOM_EXP_CATS = (function(){ try{ const r=localStorage.getItem('xcel_exp_c
 let MACHINES = (function(){ try{ const r=localStorage.getItem('xcel_machines'); return r?JSON.parse(r):['Machine 1']; }catch(e){ return ['Machine 1']; } })();
 // Drivers (admin-managed list, used on the Supply/New Trip screen)
 let DRIVERS = (function(){ try{ const r=localStorage.getItem('xcel_drivers'); return r?JSON.parse(r):[]; }catch(e){ return []; } })();
+// ── RECYCLE BIN & AUTO-BACKUP ──
+let TRASH = (function(){ try{ const r=localStorage.getItem('xcel_trash'); return r?JSON.parse(r):[]; }catch(e){ return []; } })();
+let BACKUPS = (function(){ try{ const r=localStorage.getItem('xcel_backups'); return r?JSON.parse(r):[]; }catch(e){ return []; } })();
+function saveTrash(arr){ try{ localStorage.setItem('xcel_trash', JSON.stringify(arr)); }catch(e){} }
+function saveBackups(arr){ try{ localStorage.setItem('xcel_backups', JSON.stringify(arr)); }catch(e){} }
+// Auto-backup: stores a snapshot of all main collections
+function createAutoBackup(){
+  const backup={
+    ts: Date.now(), date: TODAY, label: 'Auto backup · '+fmtDate(TODAY),
+    sales: JSON.parse(JSON.stringify(DB.sales||[])),
+    production: JSON.parse(JSON.stringify(DB.production||[])),
+    rawmats: JSON.parse(JSON.stringify(DB.rawmats||[])),
+    expenses: JSON.parse(JSON.stringify(DB.expenses||[])),
+    leakage: JSON.parse(JSON.stringify(DB.leakage||[])),
+    reconciliations: JSON.parse(JSON.stringify(DB.reconciliations||[]))
+  };
+  BACKUPS.unshift(backup);
+  if(BACKUPS.length>30) BACKUPS.pop(); // Keep only last 30 backups
+  saveBackups(BACKUPS);
+  console.log('Auto-backup created: '+backup.date);
+}
+// Restore everything from a backup snapshot
+function restoreFromBackup(backup){
+  if(!backup || !confirm('⚠️ Restore ALL data from backup dated '+backup.date+'? This will overwrite everything with data from that date.')) return;
+  Object.keys(backup).forEach(k=>{
+    if(k!=='ts'&&k!=='date'&&k!=='label'&&DB[k]!=null){
+      DB[k]=JSON.parse(JSON.stringify(backup[k]));
+    }
+  });
+  if(window.fsReady){
+    toast('Syncing to server...','s');
+    Object.keys(backup).forEach(colName=>{
+      if(colName!=='ts'&&colName!=='date'&&colName!=='label'){
+        const col=DB[colName]||[];
+        col.forEach(rec=>{ if(rec._fbId) fsUpdateDoc(fsDoc(colName, rec._fbId), rec).catch(e=>console.warn('FS restore:',e)); });
+      }
+    });
+  }
+  renderDash();
+  toast('✓ Backup restored successfully!','s');
+}
+// Restore a single item from trash
+function restoreFromTrash(trashId){
+  const trash=TRASH.find(t=>t.id===trashId);
+  if(!trash || !confirm('Restore '+trash.type+' from '+trash.date+'?')) return;
+  DB[trash.type].push(trash.record);
+  if(window.fsReady && trash.record._fbId){
+    fsUpdateDoc(fsDoc(trash.type, trash.record._fbId), trash.record).catch(e=>console.warn('FS restore:',e));
+  }
+  TRASH=TRASH.filter(t=>t.id!==trashId);
+  saveTrash(TRASH);
+  renderTrash();
+  if(trash.type==='sales') renderAS('');
+  if(trash.type==='production') {renderAP();populateBatchSelect();updateBatchMetricsPreview();populateMatLotSelect();}
+  if(trash.type==='expenses') renderAE();
+  if(trash.type==='rawmats') {renderRawMat('');updateRMPanel();updateBatchMetricsPreview();renderAP();populateMatLotSelect();renderInvSummary('');}
+  if(trash.type==='leakage') {renderRecentLeakage();updateStockHint();}
+  toast(trash.type+' restored!','s');
+}
+// Empty the entire trash (admin only)
+function emptyTrash(){
+  if(!confirm('⚠️ Permanently delete all items in trash? This cannot be undone.')) return;
+  TRASH=[];
+  saveTrash(TRASH);
+  renderTrash();
+  toast('Trash emptied','s');
+}
+// Restore from reset page backup dropdown
+function restoreBackupFromReset(){
+  const select = document.getElementById('reset-backup-select');
+  if(!select || select.value==='') {
+    toast('Please select a backup to restore','e');
+    return;
+  }
+  const idx = parseInt(select.value);
+  const backup = BACKUPS[idx];
+  if(!backup) {
+    toast('Backup not found','e');
+    return;
+  }
+  restoreFromBackup(backup);
+  renderResetPage();
+}
 const ALL_PAGES = [
   {key:'sale',   label:'Record sale',          icon:'ti-shopping-cart'},
   {key:'prod',   label:'Log production',       icon:'ti-packages'},
@@ -2344,6 +2499,8 @@ const ALL_PAGES = [
   {key:'users',  label:'Manage staff',         icon:'ti-users'},
   {key:'att-admin', label:'Attendance log',    icon:'ti-calendar-stats'},
   {key:'geo-settings', label:'Store location', icon:'ti-map-pin-cog'},
+  {key:'trash',  label:'Recycle Bin',          icon:'ti-trash'},
+  {key:'backups', label:'Data Backups',        icon:'ti-cloud-download'},
   {key:'reset',  label:'Reset system data',    icon:'ti-database-x'},
 ];
 const ALL_ACTIONS = [
@@ -2599,6 +2756,10 @@ function finaliseLogin(user){
   loadFromFirebase().finally(()=>{
     attSignIn(user);
     startAttClock();
+    // Auto-backup on app startup
+    createAutoBackup();
+    // Auto-backup every 6 hours
+    setInterval(createAutoBackup, 6*60*60*1000);
   });
 }
 
@@ -2934,7 +3095,7 @@ function closeSidebar(){
   document.getElementById('sidebar-overlay').classList.remove('open');
 }
 function goPage(name,btn){
-  if(name==='admin-notes' && (!CU || CU.role!=='admin')){ toast('Owner access only','e'); return; }
+  if((name==='admin-notes' || name==='trash' || name==='backups') && (!CU || CU.role!=='admin')){ toast('Admin access only','e'); return; }
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
   document.getElementById('page-'+name).classList.add('active');
@@ -2946,6 +3107,8 @@ function goPage(name,btn){
     attendance:()=>{updateAttStatusBar();renderAttMy();},
     'att-admin':()=>renderAttAdmin(''),
     'geo-settings':()=>renderGeoSettings(),
+    trash:()=>renderTrash(),
+    backups:()=>renderBackups(),
     reset:()=>renderResetPage(),
     'admin-notes':()=>renderAdminNotesPage()};
   if(map[name])map[name]();
@@ -5827,6 +5990,53 @@ function renderAE(){
   </tr>`).join('');
 }
 
+/* RECYCLE BIN */
+function renderTrash(){
+  const tb=document.getElementById('trash-tbody');
+  if(!TRASH.length){
+    tb.innerHTML='<tr><td colspan="5"><div class="empty"><i class="ti ti-trash-x"></i><p>Recycle Bin is empty</p></div></td></tr>';
+    document.getElementById('trash-btn-group').style.display='none';
+    return;
+  }
+  document.getElementById('trash-btn-group').style.display='';
+  tb.innerHTML=TRASH.map(t=>{
+    const rec=t.record;
+    const typeLabel={sales:'Sale',production:'Production',expenses:'Expense',rawmats:'Raw Material',leakage:'Leakage'}[t.type]||t.type;
+    let desc='';
+    if(t.type==='sales') desc=(rec.qty||rec.sold||0)+' bags';
+    if(t.type==='production') desc=(rec.qty||0)+' bags produced';
+    if(t.type==='rawmats') desc=(rec.qty||0)+' kg';
+    if(t.type==='expenses') desc='₦'+Math.abs(rec.amount||0).toLocaleString();
+    if(t.type==='leakage') desc=(rec.qty||0)+' bags';
+    return `<tr>
+      <td>${fmtDate(t.date)}</td>
+      <td><span class="badge bb">${typeLabel}</span></td>
+      <td>${desc}</td>
+      <td style="color:var(--txt3);font-size:12px">${new Date(t.ts).toLocaleString('en-NG',{dateStyle:'short',timeStyle:'short'})}</td>
+      <td><button class="btn btn-success btn-sm" onclick="restoreFromTrash('${t.id}')"><i class="ti ti-restore"></i> Restore</button></td>
+    </tr>`;
+  }).join('');
+}
+
+/* DATA BACKUPS */
+function renderBackups(){
+  const tb=document.getElementById('backups-tbody');
+  if(!BACKUPS.length){
+    tb.innerHTML='<tr><td colspan="4"><div class="empty"><i class="ti ti-cloud-download"></i><p>No backups yet. Click "Create Backup Now" to create one.</p></div></td></tr>';
+    document.getElementById('backups-btn-group').style.display='none';
+    return;
+  }
+  document.getElementById('backups-btn-group').style.display='';
+  tb.innerHTML=BACKUPS.map((b,idx)=>`<tr>
+    <td>${b.label}</td>
+    <td style="color:var(--txt3);font-size:12px">${new Date(b.ts).toLocaleString('en-NG',{dateStyle:'short',timeStyle:'short'})}</td>
+    <td style="font-size:12px">
+      ${b.sales?b.sales.length+' sales · ':''}${b.production?b.production.length+' production · ':''}${b.expenses?b.expenses.length+' expenses':''}
+    </td>
+    <td><button class="btn btn-success btn-sm" onclick="restoreFromBackup(BACKUPS[${idx}])"><i class="ti ti-restore"></i> Restore</button></td>
+  </tr>`).join('');
+}
+
 /* DASHBOARD */
 function renderDash(){
   const activeSales=DB.sales.filter(s=>!s.voided && inDR('dash',s.date));
@@ -6437,12 +6647,20 @@ function confirmDel(){
   if(!delT.t)return;
   const delType=delT.t;
   const rec=DB[delType].find(r=>r.id===delT.id);
-  // ── Firebase delete ──
+  if(!rec)return;
+  // ── Move to trash instead of permanent delete ──
+  const trashItem={
+    id: rec.id+'_'+Date.now(), type: delType, date: rec.date||TODAY, ts: Date.now(),
+    record: JSON.parse(JSON.stringify(rec))
+  };
+  TRASH.unshift(trashItem);
+  saveTrash(TRASH);
+  // Remove from DB and Firebase
+  DB[delType]=DB[delType].filter(r=>r.id!==delT.id);
   if(window.fsReady && rec && rec._fbId){
     fsDeleteDoc(fsDoc(delType, rec._fbId)).catch(e=>console.warn('FS delete:',e));
   }
-  DB[delType]=DB[delType].filter(r=>r.id!==delT.id);
-  closeMo();toast('Record deleted','s');
+  closeMo();toast('Record moved to trash. Visit Recycle Bin to restore.','s');
   if(delType==='sales')renderAS('');
   if(delType==='production'){renderAP();populateBatchSelect();updateBatchMetricsPreview();populateMatLotSelect();}
   if(delType==='expenses')renderAE();
@@ -6678,6 +6896,29 @@ function renderResetPage(){
     const chkEl = document.getElementById('reset-'+k+'-chk');
     if(chk && chkEl) chkEl.classList.toggle('on', chk.checked);
   });
+  
+  // Populate top 5 backups
+  const topBackupsContainer = document.getElementById('reset-top-backups');
+  const topBackups = BACKUPS.slice(0, 5);
+  if(topBackups.length){
+    topBackupsContainer.innerHTML = topBackups.map((b, idx)=>`
+      <button class="btn btn-outline btn-sm" onclick="restoreFromBackup(BACKUPS[${idx}])" style="text-align:left;justify-content:space-between;height:auto;padding:8px 12px">
+        <div>
+          <div style="font-size:13px;font-weight:500">${b.label}</div>
+          <div style="font-size:11px;color:var(--txt3)">Created: ${new Date(b.ts).toLocaleString('en-NG',{dateStyle:'short',timeStyle:'short'})}</div>
+        </div>
+        <div style="font-size:20px;flex-shrink:0;color:var(--grn)"><i class="ti ti-arrow-back"></i></div>
+      </button>
+    `).join('');
+  } else {
+    topBackupsContainer.innerHTML='<div style="color:var(--txt3);font-size:12px">No backups available yet. Go to Data Backups to create one.</div>';
+  }
+  
+  // Populate backup date select
+  const select = document.getElementById('reset-backup-select');
+  if(select){
+    select.innerHTML = '<option value="">— All backups —</option>' + BACKUPS.map((b,idx)=>`<option value="${idx}">${b.label}</option>`).join('');
+  }
 }
 
 function toggleResetCheck(id){
